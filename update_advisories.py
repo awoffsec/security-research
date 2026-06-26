@@ -1,4 +1,4 @@
-import os, requests, re
+import os, requests, re, time, datetime
 
 USERNAME = os.environ["GH_USERNAME"]
 TOKEN = os.environ["GH_TOKEN"]
@@ -7,6 +7,7 @@ headers = {
     "Accept": "application/vnd.github+json",
 }
 
+# --- Fetch advisories ---
 found = []
 page = 1
 while True:
@@ -14,12 +15,17 @@ while True:
         f"https://api.github.com/advisories?per_page=100&page={page}",
         headers=headers
     )
+    if resp.status_code == 403:
+        print("Rate limited, sleeping...")
+        time.sleep(60)
+        continue
     data = resp.json()
-    if not data:
+    if not data or not isinstance(data, list):
         break
     for adv in data:
         for credit in (adv.get("credits") or []):
-            if credit.get("user", {}).get("login", "").lower() == USERNAME.lower():
+            user = credit.get("user")
+            if user and user.get("login", "").lower() == USERNAME.lower():
                 found.append({
                     "ghsa_id": adv["ghsa_id"],
                     "cve_id": adv.get("cve_id") or "N/A",
@@ -31,13 +37,15 @@ while True:
                 })
     page += 1
 
-# Build markdown table
-rows = "\n".join(
-    f"| [{a['ghsa_id']}]({a['url']}) | {a['cve_id']} | {a['summary'][:60]}... | {a['severity']} | {a['credit_type']} | {a['published']} |"
-    for a in sorted(found, key=lambda x: x["published"], reverse=True)
-)
+print(f"Found {len(found)} advisories for {USERNAME}.")
 
-table = f"""## Security Advisories
+# --- Build markdown table ---
+if found:
+    rows = "\n".join(
+        f"| [{a['ghsa_id']}]({a['url']}) | {a['cve_id']} | {a['summary'][:60]} | {a['severity']} | {a['credit_type']} | {a['published']} |"
+        for a in sorted(found, key=lambda x: x["published"], reverse=True)
+    )
+    table = f"""## 🔐 Security Advisories
 
 > Auto-updated daily. Advisories from the [GitHub Advisory Database](https://github.com/advisories) where I am credited.
 
@@ -45,16 +53,28 @@ table = f"""## Security Advisories
 |----------|-----|---------|----------|------|-----------|
 {rows}
 
-*Last updated: {__import__('datetime').date.today()}*
+*Last updated: {datetime.date.today()}*
+"""
+else:
+    table = """## Security Advisories
+
+> Auto-updated daily. No credited advisories found yet.
+
+*Last updated: {datetime.date.today()}*
 """
 
-# Replace section in README between markers
-readme = open("README.md").read()
+# --- Update README between markers ---
+with open("README.md", "r") as f:
+    readme = f.read()
+
 updated = re.sub(
     r"<!-- ADVISORIES:START -->.*<!-- ADVISORIES:END -->",
     f"<!-- ADVISORIES:START -->\n{table}\n<!-- ADVISORIES:END -->",
     readme,
     flags=re.DOTALL
 )
-open("README.md", "w").write(updated)
-print(f"Found {len(found)} advisories.")
+
+with open("README.md", "w") as f:
+    f.write(updated)
+
+print("README.md updated successfully.")
