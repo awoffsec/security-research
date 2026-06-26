@@ -24,7 +24,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_USERNAME: awoffsec
-        run: python update_advisories.py
+        run: python -u update_advisories.py
 
       - name: Commit and push
         run: |
