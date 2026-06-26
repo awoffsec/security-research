@@ -13,8 +13,10 @@ page = 1
 session = requests.Session()
 session.headers.update(headers)
 
+DATE_FILTER = f"2025-01-01..{datetime.date.today()}"
+
 while True:
-    resp = session.get(f"https://api.github.com/advisories?per_page=100&page={page}")
+    resp = session.get(f"https://api.github.com/advisories?per_page=100&page={page}&published={DATE_FILTER}")
     if resp.status_code == 403:
         print("Rate limited, sleeping...")
         time.sleep(60)
@@ -47,7 +49,7 @@ if found:
         f"| [{a['ghsa_id']}]({a['url']}) | {a['cve_id']} | {a['summary'][:60]} | {a['severity']} | {a['credit_type']} | {a['published']} |"
         for a in sorted(found, key=lambda x: x["published"], reverse=True)
     )
-    table = f"""## Security Advisories
+    table = f"""## 🔐 Security Advisories
 
 > Auto-updated daily. Advisories from the [GitHub Advisory Database](https://github.com/advisories) where I am credited.
 
@@ -58,7 +60,7 @@ if found:
 *Last updated: {datetime.date.today()}*
 """
 else:
-    table = f"""## 🔐 Security Advisories
+    table = f"""## Security Advisories
 
 > Auto-updated daily. No credited advisories found yet.
 
