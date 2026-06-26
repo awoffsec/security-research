@@ -1,5 +1,8 @@
 import os, re, datetime, requests, time
-
+import sys
+print("Script started", flush=True)
+sys.stdout.flush()
+'''
 USERNAME = os.environ["GH_USERNAME"]
 TOKEN = os.environ["GH_TOKEN"]
 
@@ -92,3 +95,4 @@ with open("README.md", "w") as f:
     f.write(updated)
 
 print("README.md updated successfully.", flush=True)
+'''
