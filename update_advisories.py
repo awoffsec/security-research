@@ -10,11 +10,11 @@ headers = {
 # --- Fetch advisories ---
 found = []
 page = 1
+session = requests.Session()
+session.headers.update(headers)
+
 while True:
-    resp = requests.get(
-        f"https://api.github.com/advisories?per_page=100&page={page}",
-        headers=headers
-    )
+    resp = session.get(f"https://api.github.com/advisories?per_page=100&page={page}")
     if resp.status_code == 403:
         print("Rate limited, sleeping...")
         time.sleep(60)
@@ -22,6 +22,7 @@ while True:
     data = resp.json()
     if not data or not isinstance(data, list):
         break
+    print(f"Page {page} fetched — {len(data)} advisories")
     for adv in data:
         for credit in (adv.get("credits") or []):
             user = credit.get("user")
@@ -36,6 +37,7 @@ while True:
                     "published": adv.get("published_at", "")[:10],
                 })
     page += 1
+    time.sleep(0.1)
 
 print(f"Found {len(found)} advisories for {USERNAME}.")
 
@@ -45,7 +47,7 @@ if found:
         f"| [{a['ghsa_id']}]({a['url']}) | {a['cve_id']} | {a['summary'][:60]} | {a['severity']} | {a['credit_type']} | {a['published']} |"
         for a in sorted(found, key=lambda x: x["published"], reverse=True)
     )
-    table = f"""## 🔐 Security Advisories
+    table = f"""## Security Advisories
 
 > Auto-updated daily. Advisories from the [GitHub Advisory Database](https://github.com/advisories) where I am credited.
 
@@ -56,7 +58,7 @@ if found:
 *Last updated: {datetime.date.today()}*
 """
 else:
-    table = """## Security Advisories
+    table = f"""## 🔐 Security Advisories
 
 > Auto-updated daily. No credited advisories found yet.
 
