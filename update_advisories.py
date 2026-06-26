@@ -23,7 +23,7 @@ while True:
     soup = BeautifulSoup(resp.text, "html.parser")
     advisories = soup.select("div.Box-row")
 
-    if not advisories:
+    if "No results matched your search" in resp.text:
         break
 
     for adv in advisories:
