@@ -14,7 +14,7 @@ page = 1
 while True:
     url = f"https://github.com/advisories?query=credit%3A{USERNAME}&page={page}"
     try:
-        resp = session.get(url, timeout=30)
+        resp = session.get(url, timeout=10,30)
         print(f"Page {page} — status {resp.status_code}", flush=True)
     except requests.exceptions.Timeout:
         print(f"Page {page} — timed out!", flush=True)
