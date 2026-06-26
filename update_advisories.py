@@ -13,7 +13,15 @@ page = 1
 
 while True:
     url = f"https://github.com/advisories?query=credit%3A{USERNAME}&page={page}"
-    resp = session.get(url)
+    try:
+        resp = session.get(url, timeout=30)
+        print(f"Page {page} — status {resp.status_code}", flush=True)
+    except requests.exceptions.Timeout:
+        print(f"Page {page} — timed out!", flush=True)
+        break
+    except requests.exceptions.RequestException as e:
+        print(f"Page {page} — error: {e}", flush=True)
+        break
     print(f"Page {page} — status {resp.status_code}", flush=True)
 
     soup = BeautifulSoup(resp.text, "html.parser")
