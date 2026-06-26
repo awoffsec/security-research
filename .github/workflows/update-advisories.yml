@@ -18,13 +18,13 @@ jobs:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests beautifulsoup4
 
       - name: Fetch and update advisories
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_USERNAME: awoffsec
-        run: python -u update_advisories.py
+        run: python update_advisories.py
 
       - name: Commit and push
         run: |
