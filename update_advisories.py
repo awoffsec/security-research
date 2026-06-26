@@ -15,7 +15,10 @@ session.headers.update(headers)
 
 while True:
     print(f"Fetching page {page}...", flush=True)
-    resp = session.get(f"https://api.github.com/advisories?per_page=100&page={page}")
+    resp = session.get(
+        f"https://api.github.com/advisories?per_page=100&page={page}",
+        timeout=(10, 30)
+    )
 
     if resp.status_code == 403:
         print("Rate limited, sleeping 60s...", flush=True)
