@@ -1,52 +1,53 @@
-import os, re, time, datetime, requests
+import os, re, datetime, requests
 from bs4 import BeautifulSoup
 
 USERNAME = os.environ["GH_USERNAME"]
-TOKEN = os.environ["GH_TOKEN"]
 
 session = requests.Session()
 session.headers.update({
-    "Authorization": f"Bearer {TOKEN}",
+    "User-Agent": "Mozilla/5.0",
     "Accept": "text/html",
-    "User-Agent": "Mozilla/5.0"
+    "X-Requested-With": "XMLHttpRequest",
 })
 
-# --- Scrape GitHub advisory credit pages ---
 found = []
 page = 1
+MAX_PAGES = 20  # hard cap — safety net
 
-while True:
+while page <= MAX_PAGES:
     url = f"https://github.com/advisories?query=credit%3A{USERNAME}&page={page}"
     resp = session.get(url)
     print(f"Page {page} — status {resp.status_code}")
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    advisories = soup.select("div.Box-row")
 
-    if "No results matched your search" in resp.text:
+    # Check total count from heading e.g. "2 advisories"
+    heading = soup.find(string=re.compile(r"\d+ advisor"))
+    if heading:
+        print(f"Total: {heading.strip()}")
+
+    advisories = soup.select("div.Box-row")
+    print(f"Found {len(advisories)} rows on this page")
+
+    if not advisories or "No results matched your search" in resp.text:
+        print("No more results.")
         break
 
     for adv in advisories:
-        # GHSA link
         link = adv.select_one("a[href*='/advisories/GHSA']")
         if not link:
             continue
         href = link["href"]
         ghsa_id = href.split("/")[-1]
         advisory_url = f"https://github.com{href}"
-
-        # Summary
         summary = link.get_text(strip=True)
 
-        # Severity
         severity_el = adv.select_one("span.Label")
         severity = severity_el.get_text(strip=True) if severity_el else "Unknown"
 
-        # CVE
         cve_el = adv.find(string=re.compile(r"CVE-\d{4}-\d+"))
         cve_id = cve_el.strip() if cve_el else "N/A"
 
-        # Published date
         date_el = adv.select_one("relative-time")
         published = date_el["datetime"][:10] if date_el else "N/A"
 
@@ -60,7 +61,6 @@ while True:
         })
 
     page += 1
-    time.sleep(0.5)
 
 print(f"Found {len(found)} advisories for {USERNAME}.")
 
