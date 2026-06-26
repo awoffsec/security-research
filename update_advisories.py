@@ -1,60 +1,81 @@
-import os, requests, re, time, datetime
+import os, re, time, datetime, requests
+from bs4 import BeautifulSoup
 
 USERNAME = os.environ["GH_USERNAME"]
 TOKEN = os.environ["GH_TOKEN"]
-headers = {
-    "Authorization": f"Bearer {TOKEN}",
-    "Accept": "application/vnd.github+json",
-}
 
-# --- Fetch advisories ---
+session = requests.Session()
+session.headers.update({
+    "Authorization": f"Bearer {TOKEN}",
+    "Accept": "text/html",
+    "User-Agent": "Mozilla/5.0"
+})
+
+# --- Scrape GitHub advisory credit pages ---
 found = []
 page = 1
-session = requests.Session()
-session.headers.update(headers)
-
-DATE_FILTER = f"2025-01-01..{datetime.date.today()}"
 
 while True:
-    resp = session.get(f"https://api.github.com/advisories?per_page=100&page={page}&published={DATE_FILTER}")
-    if resp.status_code == 403:
-        print("Rate limited, sleeping...")
-        time.sleep(60)
-        continue
-    data = resp.json()
-    if not data or not isinstance(data, list):
+    url = f"https://github.com/advisories?query=credit%3A{USERNAME}&page={page}"
+    resp = session.get(url)
+    print(f"Page {page} — status {resp.status_code}")
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    advisories = soup.select("div.Box-row")
+
+    if not advisories:
         break
-    print(f"Page {page} fetched — {len(data)} advisories")
-    for adv in data:
-        for credit in (adv.get("credits") or []):
-            user = credit.get("user")
-            if user and user.get("login", "").lower() == USERNAME.lower():
-                found.append({
-                    "ghsa_id": adv["ghsa_id"],
-                    "cve_id": adv.get("cve_id") or "N/A",
-                    "summary": adv["summary"],
-                    "severity": adv.get("severity", "unknown").capitalize(),
-                    "credit_type": credit.get("type", "finder").capitalize(),
-                    "url": adv["html_url"],
-                    "published": adv.get("published_at", "")[:10],
-                })
+
+    for adv in advisories:
+        # GHSA link
+        link = adv.select_one("a[href*='/advisories/GHSA']")
+        if not link:
+            continue
+        href = link["href"]
+        ghsa_id = href.split("/")[-1]
+        advisory_url = f"https://github.com{href}"
+
+        # Summary
+        summary = link.get_text(strip=True)
+
+        # Severity
+        severity_el = adv.select_one("span.Label")
+        severity = severity_el.get_text(strip=True) if severity_el else "Unknown"
+
+        # CVE
+        cve_el = adv.find(string=re.compile(r"CVE-\d{4}-\d+"))
+        cve_id = cve_el.strip() if cve_el else "N/A"
+
+        # Published date
+        date_el = adv.select_one("relative-time")
+        published = date_el["datetime"][:10] if date_el else "N/A"
+
+        found.append({
+            "ghsa_id": ghsa_id,
+            "cve_id": cve_id,
+            "summary": summary,
+            "severity": severity,
+            "url": advisory_url,
+            "published": published,
+        })
+
     page += 1
-    time.sleep(0.1)
+    time.sleep(0.5)
 
 print(f"Found {len(found)} advisories for {USERNAME}.")
 
 # --- Build markdown table ---
 if found:
     rows = "\n".join(
-        f"| [{a['ghsa_id']}]({a['url']}) | {a['cve_id']} | {a['summary'][:60]} | {a['severity']} | {a['credit_type']} | {a['published']} |"
+        f"| [{a['ghsa_id']}]({a['url']}) | {a['cve_id']} | {a['summary'][:60]} | {a['severity']} | {a['published']} |"
         for a in sorted(found, key=lambda x: x["published"], reverse=True)
     )
-    table = f"""## 🔐 Security Advisories
+    table = f"""## Security Advisories
 
 > Auto-updated daily. Advisories from the [GitHub Advisory Database](https://github.com/advisories) where I am credited.
 
-| Advisory | CVE | Summary | Severity | Role | Published |
-|----------|-----|---------|----------|------|-----------|
+| Advisory | CVE | Summary | Severity | Published |
+|----------|-----|---------|----------|-----------|
 {rows}
 
 *Last updated: {datetime.date.today()}*
