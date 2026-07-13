@@ -10,6 +10,6 @@
 | [GHSA-93fx-g747-695x](https://github.com/advisories/GHSA-93fx-g747-695x) | CVE-2026-26992 | LibreNMS /port-groups name Stored Cross-Site Scripting | Moderate | 2026-02-18 |
 | [GHSA-5pqf-54qp-32wx](https://github.com/advisories/GHSA-5pqf-54qp-32wx) | CVE-2026-26991 | LibreNMS /device-groups name Stored Cross-Site Scripting | Moderate | 2026-02-18 |
 
-*Last updated: 2026-07-12*
+*Last updated: 2026-07-13*
 
 <!-- ADVISORIES:END -->
