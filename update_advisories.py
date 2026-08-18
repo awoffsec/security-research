@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 
 USERNAME = os.environ["GH_USERNAME"]
 TOKEN = os.environ.get("GITHUB_TOKEN")
+REPOS = [r.strip() for r in os.environ.get("GH_REPOS", "").split(",") if r.strip()]
 
 ADVISORY_TYPES = ["reviewed", "unreviewed", "malware"]
 MAX_PAGES = 50
@@ -28,47 +29,15 @@ if TOKEN:
     api.headers["Authorization"] = f"Bearer {TOKEN}"
 
 
-def discover_ghsa_ids():
-    """Return GHSA ids credited to USERNAME across all advisory types."""
-    ids = []
-    for adv_type in ADVISORY_TYPES:
-        for page in range(1, MAX_PAGES + 1):
-            resp = web.get(
-                "https://github.com/advisories",
-                params={"query": f"credit:{USERNAME} type:{adv_type}", "page": page},
-                timeout=(10, 30),
-            )
-            if resp.status_code != 200:
-                raise RuntimeError(
-                    f"advisories page returned HTTP {resp.status_code} "
-                    f"(type={adv_type}, page={page})"
-                )
-
-            soup = BeautifulSoup(resp.text, "html.parser")
-            page_ids = [
-                a["href"].rstrip("/").rsplit("/", 1)[-1]
-                for a in soup.select('a[href^="/advisories/GHSA-"]')
-            ]
-            page_ids = list(dict.fromkeys(page_ids))
-            new = [g for g in page_ids if g not in ids]
-            print(f"[{adv_type}] page {page}: {len(page_ids)} rows, {len(new)} new", flush=True)
-
-            if not new:
-                break
-            ids.extend(new)
-            time.sleep(1)
-    return ids
-
-
-def fetch_advisory(ghsa_id):
-    resp = api.get(f"https://api.github.com/advisories/{ghsa_id}", timeout=(10, 30))
+def api_get(url, **kwargs):
+    resp = api.get(url, timeout=(10, 30), **kwargs)
     if resp.status_code != 200:
-        raise RuntimeError(f"API returned HTTP {resp.status_code} for {ghsa_id}")
-    return resp.json()
+        raise RuntimeError(f"API {resp.status_code} for {url}")
+    return resp
 
 
-def is_credited(data):
-    """Confirm the credit actually stuck, rather than trusting the search index."""
+def credited(data):
+    """True if USERNAME appears in the advisory's accepted credits."""
     for credit in data.get("credits") or []:
         login = (credit.get("user") or {}).get("login") or ""
         if login.lower() == USERNAME.lower():
@@ -76,8 +45,79 @@ def is_credited(data):
     return False
 
 
+def normalize(data, source):
+    return {
+        "ghsa_id": data["ghsa_id"],
+        "cve_id": data.get("cve_id"),
+        "summary": data.get("summary") or "(no summary)",
+        "severity": (data.get("severity") or "unknown").title(),
+        "url": data.get("html_url") or f"https://github.com/advisories/{data['ghsa_id']}",
+        "published": (data.get("published_at") or "")[:10],
+        "source": source,
+    }
+
+
+def global_advisories():
+    ghsa_ids = []
+    for adv_type in ADVISORY_TYPES:
+        for page in range(1, MAX_PAGES + 1):
+            resp = web.get(
+                "https://github.com/advisories",
+                params={"query": f"credit:{USERNAME} type:{adv_type}", "page": page},
+                timeout=(10, 30),
+            )
+
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"advisories page HTTP {resp.status_code} (type={adv_type}, page={page})"
+                )
+            soup = BeautifulSoup(resp.text, "html.parser")
+            page_ids = list(dict.fromkeys(
+                a["href"].rstrip("/").rsplit("/", 1)[-1]
+                for a in soup.select('a[href^="/advisories/GHSA-"]')
+            ))
+            new = [g for g in page_ids if g not in ghsa_ids]
+            print(f"[global/{adv_type}] page {page}: {len(page_ids)} rows, {len(new)} new", flush=True)
+            if not new:
+                break
+            ghsa_ids.extend(new)
+            time.sleep(1)
+
+    out = []
+    for ghsa_id in ghsa_ids:
+        data = api_get(f"https://api.github.com/advisories/{ghsa_id}").json()
+        if credited(data):
+            out.append(normalize(data, "global"))
+            print(f"  ✓ {ghsa_id} — {data.get('cve_id') or 'no CVE'}", flush=True)
+        time.sleep(0.3)
+    return out
+
+
+def repo_advisories(repo):
+    """Published advisories on a single repo, incl. ones never globalized."""
+    out = []
+    page = 1
+    while page <= MAX_PAGES:
+        resp = api_get(
+            f"https://api.github.com/repos/{repo}/security-advisories",
+            params={"state": "published", "per_page": 100, "page": page},
+        )
+        batch = resp.json()
+        if not batch:
+            break
+        for data in batch:
+            if credited(data):
+                item = normalize(data, repo)
+                if not data.get("html_url"):
+                    item["url"] = f"https://github.com/{repo}/security/advisories/{data['ghsa_id']}"
+                out.append(item)
+                print(f"  ✓ {data['ghsa_id']} — {data.get('cve_id') or 'no CVE'} ({repo})", flush=True)
+        page += 1
+        time.sleep(0.5)
+    return out
+
+
 def cell(value):
-    """Escape a value so it can't break out of a markdown table cell."""
     text = "" if value is None else str(value)
     text = text.replace("\\", "\\\\").replace("|", "\\|")
     return " ".join(text.split()).strip()
@@ -86,11 +126,9 @@ def cell(value):
 def build_table(advisories):
     today = datetime.date.today()
     if not advisories:
-        return (
-            "## Security Advisories\n\n"
-            "> Auto-updated daily. No credited advisories found yet.\n\n"
-            f"*Last updated: {today}*\n"
-        )
+        return ("## Security Advisories\n\n"
+                "> Auto-updated daily. No credited advisories found yet.\n\n"
+                f"*Last updated: {today}*\n")
 
     rows = []
     for a in sorted(advisories, key=lambda x: x["published"] or "", reverse=True):
@@ -98,22 +136,18 @@ def build_table(advisories):
         if len(summary) > 80:
             summary = summary[:77].rstrip() + "..."
         rows.append(
-            f"| [{cell(a['ghsa_id'])}]({a['url']}) "
-            f"| {cell(a['cve_id']) or '—'} "
-            f"| {summary} "
-            f"| {cell(a['severity'])} "
-            f"| {cell(a['published']) or '—'} |"
+            f"| [{cell(a['ghsa_id'])}]({a['url']}) | {cell(a['cve_id']) or '—'} "
+            f"| {summary} | {cell(a['severity'])} | {cell(a['published']) or '—'} |"
         )
 
-    return (
-        "## Security Advisories\n\n"
-        "> Auto-updated daily. Advisories from the "
-        "[GitHub Advisory Database](https://github.com/advisories) where I am credited.\n\n"
-        "| Advisory | CVE | Summary | Severity | Published |\n"
-        "|----------|-----|---------|----------|-----------|\n"
-        + "\n".join(rows)
-        + f"\n\n*Last updated: {today}*\n"
-    )
+    return ("## Security Advisories\n\n"
+            "> Auto-updated daily. Advisories where I am credited, from the "
+            "[GitHub Advisory Database](https://github.com/advisories) and from "
+            "repository advisories.\n\n"
+            "| Advisory | CVE | Summary | Severity | Published |\n"
+            "|----------|-----|---------|----------|-----------|\n"
+            + "\n".join(rows)
+            + f"\n\n*Last updated: {today}*\n")
 
 
 def write_readme(table):
@@ -128,40 +162,25 @@ def write_readme(table):
     )
     if count == 0:
         raise RuntimeError("ADVISORIES:START / ADVISORIES:END markers not found in README.md")
-
     if updated == readme:
-        print("README.md already up to date, no write needed.", flush=True)
+        print("README.md already up to date.", flush=True)
         return
-
     with open(README, "w", encoding="utf-8") as f:
         f.write(updated)
     print("README.md updated successfully.", flush=True)
 
 
 def main():
-    ghsa_ids = discover_ghsa_ids()
-    print(f"Discovered {len(ghsa_ids)} candidate advisories.", flush=True)
+    by_id = {}
+    for item in global_advisories():
+        by_id[item["ghsa_id"]] = item
 
-    advisories = []
-    for ghsa_id in ghsa_ids:
-        data = fetch_advisory(ghsa_id)
-        if not is_credited(data):
-            print(f"  · {ghsa_id} — credit not confirmed, skipping", flush=True)
-            continue
+    for repo in REPOS:
+        print(f"[repo] {repo}", flush=True)
+        for item in repo_advisories(repo):
+            by_id.setdefault(item["ghsa_id"], item)
 
-        advisories.append({
-            "ghsa_id": data["ghsa_id"],
-            "cve_id": data.get("cve_id"),
-            "summary": data.get("summary") or "(no summary)",
-            "severity": (data.get("severity") or "unknown").title(),
-            "url": data.get("html_url") or f"https://github.com/advisories/{ghsa_id}",
-            "published": (data.get("published_at") or "")[:10],
-            "type": data.get("type"),
-        })
-        print(f"  ✓ {data['ghsa_id']} — {data.get('cve_id') or 'no CVE'} "
-              f"({data.get('type')})", flush=True)
-        time.sleep(0.3)
-
+    advisories = list(by_id.values())
     print(f"Done. {len(advisories)} confirmed advisories for {USERNAME}.", flush=True)
     write_readme(build_table(advisories))
 
