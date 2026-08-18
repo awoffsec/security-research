@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   update:
+    environment: repos
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +25,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_USERNAME: awoffsec
+          GH_REPOS: ${{ vars.GH_REPOS }}
         run: python update_advisories.py
 
       - name: Commit and push
