@@ -3,7 +3,7 @@
 <!-- ADVISORIES:START -->
 ## Security Advisories
 
-> Auto-updated daily. Advisories from the [GitHub Advisory Database](https://github.com/advisories) where I am credited.
+> Auto-updated daily. Advisories where I am credited, from the [GitHub Advisory Database](https://github.com/advisories) and from repository advisories.
 
 | Advisory | CVE | Summary | Severity | Published |
 |----------|-----|---------|----------|-----------|
