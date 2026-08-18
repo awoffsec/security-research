@@ -9,7 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 
 USERNAME = os.environ["GH_USERNAME"]
-TOKEN = os.environ.get("GITHUB_TOKEN")
+TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
 REPOS = [r.strip() for r in os.environ.get("GH_REPOS", "").split(",") if r.strip()]
 
 ADVISORY_TYPES = ["reviewed", "unreviewed", "malware"]
@@ -37,11 +37,18 @@ def api_get(url, **kwargs):
 
 
 def credited(data):
-    """True if USERNAME appears in the advisory's accepted credits."""
+    target = USERNAME.lower()
+
     for credit in data.get("credits") or []:
-        login = (credit.get("user") or {}).get("login") or ""
-        if login.lower() == USERNAME.lower():
+        login = credit.get("login") or (credit.get("user") or {}).get("login") or ""
+        if login.lower() == target:
             return True
+
+    for credit in data.get("credits_detailed") or []:
+        login = (credit.get("user") or {}).get("login") or credit.get("login") or ""
+        if login.lower() == target and credit.get("state", "accepted") == "accepted":
+            return True
+
     return False
 
 
@@ -66,7 +73,6 @@ def global_advisories():
                 params={"query": f"credit:{USERNAME} type:{adv_type}", "page": page},
                 timeout=(10, 30),
             )
-
             if resp.status_code != 200:
                 raise RuntimeError(
                     f"advisories page HTTP {resp.status_code} (type={adv_type}, page={page})"
@@ -94,7 +100,6 @@ def global_advisories():
 
 
 def repo_advisories(repo):
-    """Published advisories on a single repo, incl. ones never globalized."""
     out = []
     page = 1
     while page <= MAX_PAGES:
@@ -171,6 +176,9 @@ def write_readme(table):
 
 
 def main():
+    print(f"config: user={USERNAME} token={'yes' if TOKEN else 'no'} "
+          f"repos={REPOS or '(none — repo-only advisories will be skipped)'}", flush=True)
+
     by_id = {}
     for item in global_advisories():
         by_id[item["ghsa_id"]] = item
